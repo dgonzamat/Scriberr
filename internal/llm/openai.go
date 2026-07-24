@@ -336,8 +336,19 @@ func (s *OpenAIService) GetContextWindow(ctx context.Context, model string) (int
 		return 16385, nil
 	case strings.HasPrefix(model, "gpt-3.5-turbo"):
 		return 16385, nil // Most recent gpt-3.5-turbo is 16k
+	// Groq / OpenAI-compatible open models with large context windows.
+	case strings.Contains(model, "llama-3.3"), strings.Contains(model, "llama-3.1"),
+		strings.Contains(model, "llama3.3"), strings.Contains(model, "llama3.1"),
+		strings.Contains(model, "llama-4"), strings.Contains(model, "gpt-oss"),
+		strings.Contains(model, "qwen"), strings.Contains(model, "kimi"),
+		strings.Contains(model, "mixtral"), strings.Contains(model, "deepseek"):
+		return 128000, nil
 	default:
-		// Default fallback
+		// For custom (non-OpenAI) endpoints (e.g. Groq), assume a modern large
+		// context window rather than the tiny 4096 default.
+		if s.baseURL != "" && s.baseURL != "https://api.openai.com/v1" {
+			return 32768, nil
+		}
 		return 4096, nil
 	}
 }
