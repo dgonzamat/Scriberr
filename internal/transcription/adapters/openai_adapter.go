@@ -64,8 +64,8 @@ func NewOpenAIAdapter(apiKey string) *OpenAIAdapter {
 			Type:        "string",
 			Required:    false,
 			Default:     "whisper-1",
-			Options:     []string{"whisper-1"},
-			Description: "ID of the model to use",
+			Options:     []string{"whisper-1", "whisper-large-v3", "whisper-large-v3-turbo"},
+			Description: "ID of the model to use (Groq: whisper-large-v3 / whisper-large-v3-turbo)",
 			Group:       "basic",
 		},
 		{
@@ -113,6 +113,35 @@ func (a *OpenAIAdapter) PrepareEnvironment(ctx context.Context) error {
 	return nil
 }
 
+// transcriptionEndpoint returns the audio transcription endpoint. It defaults to
+// OpenAI but can point to any OpenAI-compatible provider (e.g. Groq) via env.
+// GROQ_BASE_URL takes precedence over OPENAI_BASE_URL (kept for backward compat),
+// e.g. "https://api.groq.com/openai/v1".
+func transcriptionEndpoint() string {
+	base := strings.TrimSpace(os.Getenv("GROQ_BASE_URL"))
+	if base == "" {
+		base = strings.TrimSpace(os.Getenv("OPENAI_BASE_URL"))
+	}
+	if base == "" {
+		return "https://api.openai.com/v1/audio/transcriptions"
+	}
+	return strings.TrimRight(base, "/") + "/audio/transcriptions"
+}
+
+// transcriptionAPIKey resolves the API key for the transcription request. It
+// prefers an explicitly configured key, then GROQ_API_KEY, then OPENAI_API_KEY
+// (kept for backward compatibility). The variable is a label: its value can be a
+// Groq key even though the historical name says OpenAI.
+func transcriptionAPIKey(configured string) string {
+	if k := strings.TrimSpace(configured); k != "" {
+		return k
+	}
+	if k := strings.TrimSpace(os.Getenv("GROQ_API_KEY")); k != "" {
+		return k
+	}
+	return strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
+}
+
 // Transcribe processes audio using OpenAI API
 //
 //nolint:gocyclo // API interaction involves many steps
@@ -147,15 +176,16 @@ func (a *OpenAIAdapter) Transcribe(ctx context.Context, input interfaces.AudioIn
 		return nil, fmt.Errorf("invalid audio input: %w", err)
 	}
 
-	// Get API Key
+	// Get API Key: explicit param > configured key > GROQ_API_KEY > OPENAI_API_KEY.
 	apiKey := a.apiKey
 	if key, ok := params["api_key"].(string); ok && key != "" {
 		apiKey = key
 	}
+	apiKey = transcriptionAPIKey(apiKey)
 
 	if apiKey == "" {
-		writeLog("Error: OpenAI API key is required but not provided")
-		return nil, fmt.Errorf("OpenAI API key is required but not provided")
+		writeLog("Error: transcription API key is required but not provided (set GROQ_API_KEY)")
+		return nil, fmt.Errorf("transcription API key is required but not provided (set GROQ_API_KEY)")
 	}
 
 	// Prepare request body
@@ -223,9 +253,11 @@ func (a *OpenAIAdapter) Transcribe(ctx context.Context, input interfaces.AudioIn
 		return nil, fmt.Errorf("failed to close multipart writer: %w", err)
 	}
 
-	// Create request
-	writeLog("Sending request to OpenAI API...")
-	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.openai.com/v1/audio/transcriptions", body)
+	// Create request. The base URL is configurable so any OpenAI-compatible
+	// transcription endpoint (e.g. Groq) can be used by setting OPENAI_BASE_URL.
+	endpoint := transcriptionEndpoint()
+	writeLog("Sending request to %s...", endpoint)
+	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, body)
 	if err != nil {
 		writeLog("Error: Failed to create request: %v", err)
 		return nil, fmt.Errorf("failed to create request: %w", err)
