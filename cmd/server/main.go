@@ -15,6 +15,7 @@ import (
 	"scriberr/internal/auth"
 	"scriberr/internal/config"
 	"scriberr/internal/database"
+	"scriberr/internal/models"
 	"scriberr/internal/processing"
 	"scriberr/internal/queue"
 	"scriberr/internal/repository"
@@ -102,6 +103,9 @@ func main() {
 	userRepo := repository.NewUserRepository(database.DB)
 	apiKeyRepo := repository.NewAPIKeyRepository(database.DB)
 	profileRepo := repository.NewProfileRepository(database.DB)
+	// For cloud-only builds (SKIP_LOCAL_MODELS), seed a default transcription
+	// profile so the primary "Transcribe" button works out of the box.
+	seedDefaultCloudProfile(profileRepo)
 	llmConfigRepo := repository.NewLLMConfigRepository(database.DB)
 	summaryRepo := repository.NewSummaryRepository(database.DB)
 	chatRepo := repository.NewChatRepository(database.DB)
@@ -220,6 +224,35 @@ func main() {
 	}
 
 	logger.Info("Server stopped")
+}
+
+// seedDefaultCloudProfile creates a default transcription profile pointing at the
+// cloud (OpenAI-compatible, e.g. Groq) so the primary "Transcribe" button works
+// without the user configuring anything. Only runs for cloud-only builds
+// (SKIP_LOCAL_MODELS=true) and only when no default profile exists yet.
+func seedDefaultCloudProfile(profileRepo repository.ProfileRepository) {
+	if os.Getenv("SKIP_LOCAL_MODELS") != "true" {
+		return
+	}
+	ctx := context.Background()
+	if _, err := profileRepo.FindDefault(ctx); err == nil {
+		return // a default profile already exists
+	}
+	profile := &models.TranscriptionProfile{
+		Name:      "Groq (whisper-large-v3)",
+		IsDefault: true,
+		Parameters: models.WhisperXParams{
+			ModelFamily: "openai",
+			Model:       "whisper-large-v3",
+			Device:      "cpu",
+			Diarize:     false,
+		},
+	}
+	if err := profileRepo.Create(ctx, profile); err != nil {
+		logger.Error("Failed to seed default cloud profile", "error", err)
+		return
+	}
+	logger.Info("Seeded default transcription profile", "name", profile.Name)
 }
 
 // registerAdapters registers all transcription and diarization adapters with config-based paths

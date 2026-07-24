@@ -89,8 +89,8 @@ interface TranscriptionConfigDialogProps {
 }
 
 const DEFAULT_PARAMS: WhisperXParams = {
-    model_family: "whisper",
-    model: "small",
+    model_family: "openai",
+    model: "whisper-large-v3",
     model_cache_only: false,
     device: "cpu",
     device_index: 0,
@@ -247,7 +247,7 @@ export const TranscriptionConfigDialog = memo(function TranscriptionConfigDialog
     const [validationStatus, setValidationStatus] = useState<'idle' | 'valid' | 'invalid'>('idle');
     const [validationMessage, setValidationMessage] = useState("");
     const { getAuthHeaders } = useAuth();
-    const [availableModels, setAvailableModels] = useState<string[]>(["whisper-1"]);
+    const [availableModels, setAvailableModels] = useState<string[]>(["whisper-large-v3", "whisper-large-v3-turbo", "whisper-1"]);
 
     // Reset when dialog opens
     useEffect(() => {
