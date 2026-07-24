@@ -21,7 +21,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import rehypeRaw from 'rehype-raw';
@@ -73,6 +73,7 @@ export function SummaryDialog({ audioId, isOpen, onClose, llmReady }: SummaryDia
     const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
     const [tplPopoverOpen, setTplPopoverOpen] = useState(false);
     const [showOutput, setShowOutput] = useState(false);
+    const summaryRef = useRef<HTMLDivElement>(null);
 
     const selectedTemplate = templates.find(t => t.id === selectedTemplateId);
 
@@ -128,6 +129,32 @@ export function SummaryDialog({ audioId, isOpen, onClose, llmReady }: SummaryDia
         link.click();
         document.body.removeChild(link);
         URL.revokeObjectURL(url);
+    };
+
+    const handlePrintPDF = () => {
+        const html = summaryRef.current?.innerHTML;
+        if (!html) return;
+        const title = audioFile?.title || "Minuta";
+        const w = window.open("", "_blank");
+        if (!w) return;
+        w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${title}</title>
+<style>
+  body { font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; color: #171717; margin: 32px; line-height: 1.6; }
+  h1 { font-size: 22px; margin: 18px 0 10px; } h2 { font-size: 18px; margin: 16px 0 8px; } h3 { font-size: 15px; margin: 14px 0 6px; }
+  p, li { color: #333; } ul, ol { padding-left: 20px; }
+  table { border-collapse: collapse; width: 100%; margin: 10px 0; }
+  th, td { border: 1px solid #999; padding: 6px 10px; text-align: left; font-size: 13px; }
+  th { background: #f2f2f2; }
+  .doc-title { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
+  .doc-meta { color: #777; font-size: 12px; margin-bottom: 18px; }
+</style></head><body>
+  <div class="doc-title">${title}</div>
+  <div class="doc-meta">Minuta generada con Scriberr</div>
+  ${html}
+</body></html>`);
+        w.document.close();
+        w.focus();
+        setTimeout(() => { w.print(); }, 300);
     };
 
     // Handle close - prevent closing during streaming
@@ -203,6 +230,16 @@ export function SummaryDialog({ audioId, isOpen, onClose, llmReady }: SummaryDia
                                 <Download className="h-3.5 w-3.5" />
                                 Download
                             </Button>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={handlePrintPDF}
+                                disabled={!streamContent && !existingSummary?.content}
+                                className="h-9 rounded-full border-[rgba(0,0,0,0.06)] dark:border-[rgba(255,255,255,0.08)] hover:bg-[var(--bg-main)] transition-all"
+                            >
+                                <FileText className="h-3.5 w-3.5" />
+                                PDF
+                            </Button>
                         </div>
 
                         {/* Content area - no inner card, full width, reading font */}
@@ -221,7 +258,7 @@ export function SummaryDialog({ audioId, isOpen, onClose, llmReady }: SummaryDia
                                     <p className="text-xs mt-1">This may take a moment</p>
                                 </div>
                             ) : (
-                                <div className="prose prose-stone dark:prose-invert max-w-none text-[#171717] dark:text-[#EDEDED] leading-relaxed">
+                                <div ref={summaryRef} className="prose prose-stone dark:prose-invert max-w-none text-[#171717] dark:text-[#EDEDED] leading-relaxed">
                                     <ReactMarkdown
                                         remarkPlugins={[remarkMath]}
                                         rehypePlugins={[rehypeRaw as any, rehypeKatex as any, rehypeHighlight as any]} // eslint-disable-line @typescript-eslint/no-explicit-any

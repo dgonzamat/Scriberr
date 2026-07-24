@@ -108,6 +108,8 @@ func main() {
 	seedDefaultCloudProfile(profileRepo)
 	llmConfigRepo := repository.NewLLMConfigRepository(database.DB)
 	summaryRepo := repository.NewSummaryRepository(database.DB)
+	// Seed a default "Minuta" summary template (resumen + compromisos) for cloud builds.
+	seedDefaultMinutaTemplate(summaryRepo)
 	chatRepo := repository.NewChatRepository(database.DB)
 	noteRepo := repository.NewNoteRepository(database.DB)
 	speakerMappingRepo := repository.NewSpeakerMappingRepository(database.DB)
@@ -253,6 +255,46 @@ func seedDefaultCloudProfile(profileRepo repository.ProfileRepository) {
 		return
 	}
 	logger.Info("Seeded default transcription profile", "name", profile.Name)
+}
+
+// seedDefaultMinutaTemplate seeds a Spanish "Minuta" summary template (executive
+// summary + commitments) for cloud builds, so the summary produces a useful
+// meeting minute out of the box. Only runs for SKIP_LOCAL_MODELS builds and only
+// when no summary templates exist yet.
+func seedDefaultMinutaTemplate(summaryRepo repository.SummaryRepository) {
+	if os.Getenv("SKIP_LOCAL_MODELS") != "true" {
+		return
+	}
+	ctx := context.Background()
+	if items, _, err := summaryRepo.List(ctx, 0, 1); err == nil && len(items) > 0 {
+		return // templates already exist
+	}
+	prompt := `Eres un asistente que redacta minutas de reunión en español. A partir de la transcripción anterior, genera una minuta clara y profesional en Markdown con estas secciones:
+
+## Resumen ejecutivo
+3 a 5 viñetas con lo esencial de la reunión.
+
+## Temas tratados
+Los principales puntos discutidos, agrupados por tema.
+
+## Decisiones
+Las decisiones tomadas, una por línea.
+
+## Compromisos y próximos pasos
+Una tabla con columnas: Responsable | Compromiso | Fecha límite. Si no se menciona el responsable o la fecha, escribe "por definir". Incluye solo compromisos concretos y accionables.
+
+Sé fiel a la transcripción; no inventes datos ni nombres. Si algo no queda claro en el audio, indícalo.`
+	tpl := &models.SummaryTemplate{
+		Name:               "Minuta (resumen + compromisos)",
+		Model:              "llama-3.3-70b-versatile",
+		Prompt:             prompt,
+		IncludeSpeakerInfo: true,
+	}
+	if err := summaryRepo.Create(ctx, tpl); err != nil {
+		logger.Error("Failed to seed default minuta template", "error", err)
+		return
+	}
+	logger.Info("Seeded default summary template", "name", tpl.Name)
 }
 
 // registerAdapters registers all transcription and diarization adapters with config-based paths
