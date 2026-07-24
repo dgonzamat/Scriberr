@@ -1,0 +1,38 @@
+# Perfil de cliente — EJEMPLO ILUSTRATIVO, NO NORMATIVO.
+# Placeholders neutros, sin industria. El schema real se congela en Fase 1/1b.
+# Un perfil real vive fuera de git (ver ../.gitignore) y se carga en runtime.
+
+id: cliente_ejemplo
+nombre_visible: "Cliente Ejemplo"
+idioma: es-CL
+tono: "formal, conciso, orientado a decisiones"
+
+# Glosario: término del dominio -> expansión/definición que el LLM debe respetar.
+glosario:
+  TERMINO_EJEMPLO: "Descripción neutra del término tal como debe interpretarse."
+  OTRO_TERMINO: "Otra definición de dominio que el LLM no debe alterar."
+
+# Siglas del dominio -> expansión.
+siglas:
+  ABC: "Expansión de la sigla ABC"
+
+# Roles/cargos esperados en la reunión (ayudan a atribuir intervenciones).
+roles:
+  - "Rol Ejemplo 1"
+  - "Rol Ejemplo 2"
+
+# Formato del acta: secciones y su orden.
+formato_acta:
+  secciones:
+    - resumen_ejecutivo
+    - decisiones
+    - discusion
+    - compromisos
+
+# Sub-schema de compromisos (ver senior-pm, acotado).
+compromisos:
+  campos:
+    - responsable
+    - fecha
+    - estado        # p.ej. pendiente | en_curso | cumplido | vencido
+    - seguimiento

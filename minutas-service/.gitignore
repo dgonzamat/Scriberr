@@ -1,0 +1,12 @@
+# Perfiles reales de cliente NO se commitean: el repo nunca sabe de qué
+# industria se trata. Se cargan/montan en runtime. Ver CLAUDE.md §4.
+profiles/*.yaml
+profiles/*.yml
+# ...salvo el ejemplo neutro e ilustrativo:
+!profiles/_example.yaml
+!profiles/_example.yml
+
+# Runtime / build (a completar por fase según el stack elegido en el ADR)
+*.env
+.env
+.env.*
