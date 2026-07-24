@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -79,10 +80,35 @@ type Segment struct {
 }
 
 // getLLMService returns a provider-agnostic LLM service based on active config
+// envLLMService builds an LLM service from cloud env vars (Groq/OpenAI) when no
+// active LLM config is stored. Prefers GROQ_*, falls back to OPENAI_*.
+func envLLMService() (llm.Service, string, bool) {
+	if key := strings.TrimSpace(os.Getenv("GROQ_API_KEY")); key != "" {
+		base := strings.TrimSpace(os.Getenv("GROQ_BASE_URL"))
+		if base == "" {
+			base = "https://api.groq.com/openai/v1"
+		}
+		return llm.NewOpenAIService(key, &base), "openai", true
+	}
+	if key := strings.TrimSpace(os.Getenv("OPENAI_API_KEY")); key != "" {
+		var baseURL *string
+		if base := strings.TrimSpace(os.Getenv("OPENAI_BASE_URL")); base != "" {
+			baseURL = &base
+		}
+		return llm.NewOpenAIService(key, baseURL), "openai", true
+	}
+	return nil, "", false
+}
+
 func (h *Handler) getLLMService(ctx context.Context) (llm.Service, string, error) {
 	cfg, err := h.llmConfigRepo.GetActive(ctx)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
+			// Fallback: use cloud env vars (Groq/OpenAI) if configured, so
+			// summarization/chat work without a stored LLM config.
+			if svc, provider, ok := envLLMService(); ok {
+				return svc, provider, nil
+			}
 			return nil, "", fmt.Errorf("no active LLM configuration found")
 		}
 		return nil, "", fmt.Errorf("failed to get LLM config: %w", err)

@@ -15,6 +15,7 @@ import (
 	"scriberr/internal/auth"
 	"scriberr/internal/config"
 	"scriberr/internal/database"
+	"scriberr/internal/models"
 	"scriberr/internal/processing"
 	"scriberr/internal/queue"
 	"scriberr/internal/repository"
@@ -102,8 +103,13 @@ func main() {
 	userRepo := repository.NewUserRepository(database.DB)
 	apiKeyRepo := repository.NewAPIKeyRepository(database.DB)
 	profileRepo := repository.NewProfileRepository(database.DB)
+	// For cloud-only builds (SKIP_LOCAL_MODELS), seed a default transcription
+	// profile so the primary "Transcribe" button works out of the box.
+	seedDefaultCloudProfile(profileRepo)
 	llmConfigRepo := repository.NewLLMConfigRepository(database.DB)
 	summaryRepo := repository.NewSummaryRepository(database.DB)
+	// Seed a default "Minuta" summary template (resumen + compromisos) for cloud builds.
+	seedDefaultMinutaTemplate(summaryRepo)
 	chatRepo := repository.NewChatRepository(database.DB)
 	noteRepo := repository.NewNoteRepository(database.DB)
 	speakerMappingRepo := repository.NewSpeakerMappingRepository(database.DB)
@@ -119,11 +125,18 @@ func main() {
 	unifiedProcessor := transcription.NewUnifiedJobProcessor(jobRepo, cfg.TempDir, cfg.TranscriptsDir)
 	unifiedProcessor.GetUnifiedService().SetBroadcaster(broadcaster)
 
-	// Bootstrap embedded Python environment (for all adapters)
-	logger.Startup("python", "Preparing Python environment")
-	if err := unifiedProcessor.InitEmbeddedPythonEnv(); err != nil {
-		logger.Error("Failed to prepare Python environment", "error", err)
-		os.Exit(1)
+	// Bootstrap embedded Python environment (for local model adapters).
+	// Skipped when SKIP_LOCAL_MODELS=true — used when transcribing via a cloud
+	// provider (Groq/OpenAI), which needs no local Python models. This makes the
+	// server boot instantly without preparing or downloading any local models.
+	if os.Getenv("SKIP_LOCAL_MODELS") == "true" {
+		logger.Info("SKIP_LOCAL_MODELS=true — skipping local model preparation (cloud transcription only)")
+	} else {
+		logger.Startup("python", "Preparing Python environment")
+		if err := unifiedProcessor.InitEmbeddedPythonEnv(); err != nil {
+			logger.Error("Failed to prepare Python environment", "error", err)
+			os.Exit(1)
+		}
 	}
 
 	// Initialize quick transcription service
@@ -213,6 +226,75 @@ func main() {
 	}
 
 	logger.Info("Server stopped")
+}
+
+// seedDefaultCloudProfile creates a default transcription profile pointing at the
+// cloud (OpenAI-compatible, e.g. Groq) so the primary "Transcribe" button works
+// without the user configuring anything. Only runs for cloud-only builds
+// (SKIP_LOCAL_MODELS=true) and only when no default profile exists yet.
+func seedDefaultCloudProfile(profileRepo repository.ProfileRepository) {
+	if os.Getenv("SKIP_LOCAL_MODELS") != "true" {
+		return
+	}
+	ctx := context.Background()
+	if _, err := profileRepo.FindDefault(ctx); err == nil {
+		return // a default profile already exists
+	}
+	profile := &models.TranscriptionProfile{
+		Name:      "Groq (whisper-large-v3)",
+		IsDefault: true,
+		Parameters: models.WhisperXParams{
+			ModelFamily: "openai",
+			Model:       "whisper-large-v3",
+			Device:      "cpu",
+			Diarize:     false,
+		},
+	}
+	if err := profileRepo.Create(ctx, profile); err != nil {
+		logger.Error("Failed to seed default cloud profile", "error", err)
+		return
+	}
+	logger.Info("Seeded default transcription profile", "name", profile.Name)
+}
+
+// seedDefaultMinutaTemplate seeds a Spanish "Minuta" summary template (executive
+// summary + commitments) for cloud builds, so the summary produces a useful
+// meeting minute out of the box. Only runs for SKIP_LOCAL_MODELS builds and only
+// when no summary templates exist yet.
+func seedDefaultMinutaTemplate(summaryRepo repository.SummaryRepository) {
+	if os.Getenv("SKIP_LOCAL_MODELS") != "true" {
+		return
+	}
+	ctx := context.Background()
+	if items, _, err := summaryRepo.List(ctx, 0, 1); err == nil && len(items) > 0 {
+		return // templates already exist
+	}
+	prompt := `Eres un asistente que redacta minutas de reunión en español. A partir de la transcripción anterior, genera una minuta clara y profesional en Markdown con estas secciones:
+
+## Resumen ejecutivo
+3 a 5 viñetas con lo esencial de la reunión.
+
+## Temas tratados
+Los principales puntos discutidos, agrupados por tema.
+
+## Decisiones
+Las decisiones tomadas, una por línea.
+
+## Compromisos y próximos pasos
+Una tabla con columnas: Responsable | Compromiso | Fecha límite. Si no se menciona el responsable o la fecha, escribe "por definir". Incluye solo compromisos concretos y accionables.
+
+Sé fiel a la transcripción; no inventes datos ni nombres. Si algo no queda claro en el audio, indícalo.`
+	tpl := &models.SummaryTemplate{
+		Name:               "Minuta (resumen + compromisos)",
+		Model:              "llama-3.3-70b-versatile",
+		Prompt:             prompt,
+		IncludeSpeakerInfo: true,
+	}
+	if err := summaryRepo.Create(ctx, tpl); err != nil {
+		logger.Error("Failed to seed default minuta template", "error", err)
+		return
+	}
+	logger.Info("Seeded default summary template", "name", tpl.Name)
 }
 
 // registerAdapters registers all transcription and diarization adapters with config-based paths

@@ -3,6 +3,7 @@ package api
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"strings"
@@ -48,9 +49,6 @@ func (h *Handler) Summarize(c *gin.Context) {
 		return
 	}
 
-	// Prepare chat messages: simple single-user message with full content
-	messages := []llm.ChatMessage{{Role: "user", Content: req.Content}}
-
 	start := time.Now()
 	log.Printf("[summarize] start transcription_id=%s provider=%s model=%s content_len=%d", req.TranscriptionID, provider, req.Model, len(req.Content))
 
@@ -62,6 +60,14 @@ func (h *Handler) Summarize(c *gin.Context) {
 	c.Header("X-Accel-Buffering", "no") // Disable nginx buffering
 	c.Status(http.StatusOK)             // Start response immediately
 
+	// Free tiers (Groq/OpenAI) cap tokens-per-minute per request, so very long
+	// transcripts can't be summarized in one call. Chunk + map-reduce for those.
+	if len(req.Content) > 40000 { // ~10k tokens
+		h.processLargeSummarization(c, req, svc, start)
+		return
+	}
+
+	messages := []llm.ChatMessage{{Role: "user", Content: req.Content}}
 	h.processSummarization(c, req, svc, messages, start)
 }
 
@@ -115,6 +121,138 @@ func (h *Handler) processSummarization(c *gin.Context, req SummarizeRequest, svc
 			return
 		}
 	}
+}
+
+// processLargeSummarization summarizes transcripts too large for a single request
+// on rate-limited free tiers (e.g. Groq 12k tokens/min). It splits the transcript
+// into chunks, extracts notes from each (map), then synthesizes the final minute
+// from those notes (reduce), retrying whenever the per-minute rate limit is hit.
+func (h *Handler) processLargeSummarization(c *gin.Context, req SummarizeRequest, svc llm.Service, start time.Time) {
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Minute)
+	defer cancel()
+	flusher, _ := c.Writer.(http.Flusher)
+	fail := func(msg string) {
+		_, _ = c.Writer.Write([]byte(msg))
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}
+
+	// Separate transcript from the instructions appended by the client.
+	transcript, instructions := req.Content, ""
+	if idx := strings.LastIndex(req.Content, "\n\nInstructions:\n"); idx >= 0 {
+		transcript = req.Content[:idx]
+		instructions = req.Content[idx+len("\n\nInstructions:\n"):]
+	}
+	chunks := chunkText(transcript, 34000) // ~9k tokens per chunk (under 12k TPM)
+	log.Printf("[summarize] large map-reduce transcription_id=%s chunks=%d", req.TranscriptionID, len(chunks))
+
+	// MAP: extract structured notes from each chunk.
+	notes := make([]string, 0, len(chunks))
+	for i, ch := range chunks {
+		msg := []llm.ChatMessage{{Role: "user", Content: fmt.Sprintf(
+			"Esta es la PARTE %d de %d de la transcripción de una reunión. Extrae en viñetas concisas: temas tratados, decisiones y compromisos (con responsable y fecha si se mencionan). Sé fiel al texto; no inventes datos.\n\n%s",
+			i+1, len(chunks), ch)}}
+		resp, err := chatWithRetry(ctx, svc, req.Model, msg)
+		if err != nil {
+			fail("No se pudo generar el resumen (límite de la API o error): " + err.Error())
+			return
+		}
+		if len(resp.Choices) > 0 {
+			notes = append(notes, resp.Choices[0].Message.Content)
+		}
+	}
+
+	// REDUCE: synthesize the final minute from the partial notes.
+	reduce := "A continuación hay notas parciales de una reunión, en orden:\n\n" +
+		strings.Join(notes, "\n\n") + "\n\nInstructions:\n" + instructions
+	resp, err := chatWithRetry(ctx, svc, req.Model, []llm.ChatMessage{{Role: "user", Content: reduce}})
+	if err != nil {
+		fail("No se pudo generar la minuta final (límite de la API o error): " + err.Error())
+		return
+	}
+	final := ""
+	if len(resp.Choices) > 0 {
+		final = resp.Choices[0].Message.Content
+	}
+	_, _ = c.Writer.Write([]byte(final))
+	if flusher != nil {
+		flusher.Flush()
+	}
+	h.persistSummary(req, final)
+	log.Printf("[summarize] large complete transcription_id=%s chunks=%d bytes=%d duration_ms=%d", req.TranscriptionID, len(chunks), len(final), time.Since(start).Milliseconds())
+}
+
+// chunkText splits s into pieces no larger than maxChars, breaking at a sentence
+// or word boundary when possible.
+func chunkText(s string, maxChars int) []string {
+	s = strings.TrimSpace(s)
+	if len(s) <= maxChars {
+		return []string{s}
+	}
+	var chunks []string
+	for len(s) > maxChars {
+		cut := maxChars
+		if idx := strings.LastIndexAny(s[:maxChars], ".!?\n "); idx > maxChars/2 {
+			cut = idx + 1
+		}
+		chunks = append(chunks, strings.TrimSpace(s[:cut]))
+		s = s[cut:]
+	}
+	if strings.TrimSpace(s) != "" {
+		chunks = append(chunks, strings.TrimSpace(s))
+	}
+	return chunks
+}
+
+// chatWithRetry calls the LLM and retries when the provider reports a per-minute
+// rate limit with a "try again in Xs" hint (waiting the suggested time).
+func chatWithRetry(ctx context.Context, svc llm.Service, model string, messages []llm.ChatMessage) (*llm.ChatResponse, error) {
+	var lastErr error
+	for attempt := 0; attempt < 6; attempt++ {
+		resp, err := svc.ChatCompletion(ctx, model, messages, 0.0)
+		if err == nil {
+			return resp, nil
+		}
+		lastErr = err
+		wait := parseRetrySeconds(err.Error())
+		if wait <= 0 {
+			return nil, err // not a retryable rate limit
+		}
+		if wait > 120 {
+			wait = 120
+		}
+		log.Printf("[summarize] rate limited, retrying in %ds", wait)
+		select {
+		case <-time.After(time.Duration(wait) * time.Second):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return nil, lastErr
+}
+
+// parseRetrySeconds extracts a wait time from a rate-limit message like
+// "Please try again in 6.5s" or "try again in 1m2.3s". Returns 0 if none.
+func parseRetrySeconds(msg string) int {
+	i := strings.Index(msg, "try again in ")
+	if i < 0 {
+		return 0
+	}
+	rest := msg[i+len("try again in "):]
+	var mins, secs float64
+	if mi := strings.Index(rest, "m"); mi >= 0 && mi < 6 {
+		fmt.Sscanf(rest[:mi], "%f", &mins)
+		rest = rest[mi+1:]
+	}
+	if si := strings.Index(rest, "s"); si >= 0 {
+		fmt.Sscanf(rest[:si], "%f", &secs)
+	}
+	total := mins*60 + secs
+	if total <= 0 {
+		return 0
+	}
+	return int(total) + 1
 }
 
 func (h *Handler) handleSummarizeError(c *gin.Context, req SummarizeRequest, svc llm.Service, messages []llm.ChatMessage, err error, partialText string, start time.Time) {
