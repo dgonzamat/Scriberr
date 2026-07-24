@@ -34,7 +34,7 @@ remoto). Ya viene un `render.yaml` (Blueprint) listo.
 2. [render.com](https://render.com) → regístrate con GitHub (gratis).
 3. **New → Blueprint** → conecta tu repo `Scriberr` → Render detecta `render.yaml`
    → **Apply**.
-4. En el servicio, **Environment → Add** el secret `OPENAI_API_KEY` = tu key de
+4. En el servicio, **Environment → Add** el secret `GROQ_API_KEY` = tu key de
    Groq (las otras variables ya vienen en el blueprint). Save → redeploy.
 5. Cuando el build termina, Render te da una **URL HTTPS pública**. Ábrela →
    regístrate → sube audio → modelo **"OpenAI Whisper"**, campo *model* =
@@ -89,8 +89,8 @@ En el Space → **Settings → Variables and secrets → New secret**:
 
 | Nombre | Valor |
 |---|---|
-| `OPENAI_API_KEY` | tu key de Groq (`gsk_...`) |
-| `OPENAI_BASE_URL` | `https://api.groq.com/openai/v1` |
+| `GROQ_API_KEY` | tu key de Groq (`gsk_...`) |
+| `GROQ_BASE_URL` | `https://api.groq.com/openai/v1` |
 | `JWT_SECRET` | `openssl rand -hex 32` |
 
 El Space reconstruye solo. Cuando el build termina, abre la URL del Space.
@@ -135,5 +135,5 @@ PWA instalable encima. La decisión "cloud vs local" es la Fase 0 del plan de mi
 ## Otros hosts compatibles con `Dockerfile.lite`
 
 Fly.io (`deploy/fly.toml`), Render, Koyeb o cualquier VPS con Docker sirven la
-misma imagen liviana; setea `OPENAI_API_KEY`, `OPENAI_BASE_URL` y un volumen en
+misma imagen liviana; setea `GROQ_API_KEY`, `GROQ_BASE_URL` y un volumen en
 `/app/data` para persistir.

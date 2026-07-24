@@ -19,8 +19,8 @@ obligatorio para que Hugging Face configure el Space como Docker en el puerto 80
 
 ## Secrets a configurar en el Space (Settings → Variables and secrets)
 
-- `OPENAI_API_KEY` — tu key gratis de Groq (console.groq.com).
-- `OPENAI_BASE_URL` — `https://api.groq.com/openai/v1`
+- `GROQ_API_KEY` — tu key gratis de Groq (console.groq.com).
+- `GROQ_BASE_URL` — `https://api.groq.com/openai/v1`
 - `JWT_SECRET` — cadena aleatoria larga (`openssl rand -hex 32`).
 
 Ver la guía completa en `DEPLOY-ON-THE-GO.md`.

@@ -16,9 +16,9 @@ services:
     healthCheckPath: /api/v1/auth/registration-status
     autoDeploy: true
     envVars:
-      - key: OPENAI_BASE_URL        # apunta la transcripción a Groq (compatible OpenAI)
+      - key: GROQ_BASE_URL          # endpoint de transcripción (Groq, compatible OpenAI)
         value: https://api.groq.com/openai/v1
-      - key: OPENAI_API_KEY         # SECRET: tu key de Groq (gsk_...) — se setea en el dashboard
+      - key: GROQ_API_KEY           # SECRET: tu key de Groq (gsk_...) — se setea en el dashboard
         sync: false
       - key: JWT_SECRET             # se genera solo; mantiene los logins entre redeploys
         generateValue: true

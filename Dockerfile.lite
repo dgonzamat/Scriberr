@@ -8,8 +8,9 @@
 # Resultado: imagen de ~100-150MB que arranca en segundos y cabe en un contenedor
 # chico siempre-encendido (Railway, Fly.io, Render, cualquier VPS).
 #
-# Runtime: OPENAI_API_KEY (key de OpenAI o Groq) y, para Groq gratis,
-#   OPENAI_BASE_URL=https://api.groq.com/openai/v1
+# Runtime (para Groq gratis):
+#   GROQ_API_KEY=gsk_...   y   GROQ_BASE_URL=https://api.groq.com/openai/v1
+# (También acepta OPENAI_API_KEY / OPENAI_BASE_URL como respaldo.)
 # Build:  docker build -f Dockerfile.lite -t scriberr-lite .
 
 ########################

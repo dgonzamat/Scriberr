@@ -114,14 +114,32 @@ func (a *OpenAIAdapter) PrepareEnvironment(ctx context.Context) error {
 }
 
 // transcriptionEndpoint returns the audio transcription endpoint. It defaults to
-// OpenAI but can point to any OpenAI-compatible provider (e.g. Groq) via the
-// OPENAI_BASE_URL environment variable, e.g. "https://api.groq.com/openai/v1".
+// OpenAI but can point to any OpenAI-compatible provider (e.g. Groq) via env.
+// GROQ_BASE_URL takes precedence over OPENAI_BASE_URL (kept for backward compat),
+// e.g. "https://api.groq.com/openai/v1".
 func transcriptionEndpoint() string {
-	base := strings.TrimSpace(os.Getenv("OPENAI_BASE_URL"))
+	base := strings.TrimSpace(os.Getenv("GROQ_BASE_URL"))
+	if base == "" {
+		base = strings.TrimSpace(os.Getenv("OPENAI_BASE_URL"))
+	}
 	if base == "" {
 		return "https://api.openai.com/v1/audio/transcriptions"
 	}
 	return strings.TrimRight(base, "/") + "/audio/transcriptions"
+}
+
+// transcriptionAPIKey resolves the API key for the transcription request. It
+// prefers an explicitly configured key, then GROQ_API_KEY, then OPENAI_API_KEY
+// (kept for backward compatibility). The variable is a label: its value can be a
+// Groq key even though the historical name says OpenAI.
+func transcriptionAPIKey(configured string) string {
+	if k := strings.TrimSpace(configured); k != "" {
+		return k
+	}
+	if k := strings.TrimSpace(os.Getenv("GROQ_API_KEY")); k != "" {
+		return k
+	}
+	return strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
 }
 
 // Transcribe processes audio using OpenAI API
@@ -158,15 +176,16 @@ func (a *OpenAIAdapter) Transcribe(ctx context.Context, input interfaces.AudioIn
 		return nil, fmt.Errorf("invalid audio input: %w", err)
 	}
 
-	// Get API Key
+	// Get API Key: explicit param > configured key > GROQ_API_KEY > OPENAI_API_KEY.
 	apiKey := a.apiKey
 	if key, ok := params["api_key"].(string); ok && key != "" {
 		apiKey = key
 	}
+	apiKey = transcriptionAPIKey(apiKey)
 
 	if apiKey == "" {
-		writeLog("Error: OpenAI API key is required but not provided")
-		return nil, fmt.Errorf("OpenAI API key is required but not provided")
+		writeLog("Error: transcription API key is required but not provided (set GROQ_API_KEY)")
+		return nil, fmt.Errorf("transcription API key is required but not provided (set GROQ_API_KEY)")
 	}
 
 	// Prepare request body
