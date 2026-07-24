@@ -9,6 +9,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -128,6 +129,31 @@ func transcriptionEndpoint() string {
 	return strings.TrimRight(base, "/") + "/audio/transcriptions"
 }
 
+// compressForUpload transcodes audio to a small 16kHz mono AAC (.m4a) file so it
+// stays under cloud provider upload limits (Groq/OpenAI ~25MB). Uses ffmpeg's
+// built-in AAC encoder (always available, no external libs). Returns the path to
+// upload and whether it is a temporary file to delete. Falls back to the original
+// path if ffmpeg is unavailable or the transcode fails.
+func compressForUpload(ctx context.Context, srcPath string, writeLog func(string, ...interface{})) (string, bool) {
+	out := srcPath + ".upload.m4a"
+	cmd := exec.CommandContext(ctx, "ffmpeg",
+		"-i", srcPath,
+		"-ar", "16000", "-ac", "1",
+		"-c:a", "aac", "-b:a", "32k",
+		"-y", out)
+	if err := cmd.Run(); err != nil {
+		writeLog("Audio compression skipped (ffmpeg unavailable or failed): %v", err)
+		return srcPath, false
+	}
+	st, err := os.Stat(out)
+	if err != nil || st.Size() == 0 {
+		_ = os.Remove(out)
+		return srcPath, false
+	}
+	writeLog("Compressed audio for upload: %s (%d bytes)", filepath.Base(out), st.Size())
+	return out, true
+}
+
 // transcriptionAPIKey resolves the API key for the transcription request. It
 // prefers an explicitly configured key, then GROQ_API_KEY, then OPENAI_API_KEY
 // (kept for backward compatibility). The variable is a label: its value can be a
@@ -192,15 +218,26 @@ func (a *OpenAIAdapter) Transcribe(ctx context.Context, input interfaces.AudioIn
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
 
+	// Large files exceed the provider size limit (Groq/OpenAI ~25MB), especially
+	// after Scriberr converts to uncompressed WAV. Compress big files to a small
+	// 16kHz mono AAC before uploading so long recordings fit.
+	uploadPath := input.FilePath
+	if st, statErr := os.Stat(input.FilePath); statErr == nil && st.Size() > 20*1024*1024 {
+		if compressed, isTemp := compressForUpload(ctx, input.FilePath, writeLog); isTemp {
+			uploadPath = compressed
+			defer os.Remove(compressed)
+		}
+	}
+
 	// Add file
-	file, err := os.Open(input.FilePath)
+	file, err := os.Open(uploadPath)
 	if err != nil {
 		writeLog("Error: Failed to open audio file: %v", err)
 		return nil, fmt.Errorf("failed to open audio file: %w", err)
 	}
 	defer file.Close()
 
-	part, err := writer.CreateFormFile("file", filepath.Base(input.FilePath))
+	part, err := writer.CreateFormFile("file", filepath.Base(uploadPath))
 	if err != nil {
 		writeLog("Error: Failed to create form file: %v", err)
 		return nil, fmt.Errorf("failed to create form file: %w", err)
