@@ -1,0 +1,70 @@
+# Dockerfile.lite — Scriberr "on the go": imagen liviana SIN modelos ML locales.
+#
+# Transcribe vía la API de OpenAI Whisper (adapter Go puro, sin Python/uv/GPU).
+# Al arrancar, la preparación de los modelos locales (WhisperX, Parakeet, etc.)
+# falla rápido porque `uv`/`git` no están en la imagen; el server solo lo registra
+# como warning y levanta igual. El único modelo utilizable es `openai_whisper`.
+#
+# Resultado: imagen de ~100-150MB que arranca en segundos y cabe en un contenedor
+# chico siempre-encendido (Railway, Fly.io, Render, cualquier VPS).
+#
+# Runtime: OPENAI_API_KEY (key de OpenAI o Groq) y, para Groq gratis,
+#   OPENAI_BASE_URL=https://api.groq.com/openai/v1
+# Build:  docker build -f Dockerfile.lite -t scriberr-lite .
+
+########################
+# UI build stage
+########################
+FROM node:20-alpine AS ui-builder
+WORKDIR /web
+COPY web/frontend/package*.json ./frontend/
+RUN cd frontend && npm ci
+COPY web/frontend ./frontend
+RUN cd frontend && npm run build
+
+########################
+# Go build stage (binario estático, SQLite es pure-Go — sin CGO)
+########################
+FROM golang:1.24-bookworm AS go-builder
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN rm -rf internal/web/dist && mkdir -p internal/web
+COPY --from=ui-builder /web/frontend/dist internal/web/dist
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /out/scriberr cmd/server/main.go
+
+########################
+# Runtime stage — mínimo: sin uv, sin python, sin git (por diseño)
+########################
+FROM debian:bookworm-slim AS runtime
+
+ENV HOST=0.0.0.0 \
+    PORT=8080 \
+    APP_ENV=production \
+    DATABASE_PATH=/app/data/scriberr.db \
+    UPLOAD_DIR=/app/data/uploads \
+    TRANSCRIPTS_DIR=/app/data/transcripts \
+    TEMP_DIR=/app/data/temp \
+    JWT_SECRET_FILE=/app/data/jwt_secret
+
+WORKDIR /app
+
+# ca-certificates: HTTPS hacia la API de OpenAI.  ffmpeg: solo para merge multi-track.
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+       ca-certificates ffmpeg \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd -g 1000 appuser \
+    && useradd -m -u 1000 -g 1000 appuser \
+    && mkdir -p /app/data/uploads /app/data/transcripts /app/data/temp \
+    && chown -R appuser:appuser /app
+
+COPY --from=go-builder /out/scriberr /app/scriberr
+RUN chown appuser:appuser /app/scriberr
+
+USER appuser
+EXPOSE 8080
+VOLUME ["/app/data"]
+
+CMD ["/app/scriberr"]

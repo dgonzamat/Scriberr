@@ -64,8 +64,8 @@ func NewOpenAIAdapter(apiKey string) *OpenAIAdapter {
 			Type:        "string",
 			Required:    false,
 			Default:     "whisper-1",
-			Options:     []string{"whisper-1"},
-			Description: "ID of the model to use",
+			Options:     []string{"whisper-1", "whisper-large-v3", "whisper-large-v3-turbo"},
+			Description: "ID of the model to use (Groq: whisper-large-v3 / whisper-large-v3-turbo)",
 			Group:       "basic",
 		},
 		{
@@ -111,6 +111,17 @@ func (a *OpenAIAdapter) GetSupportedModels() []string {
 func (a *OpenAIAdapter) PrepareEnvironment(ctx context.Context) error {
 	a.initialized = true
 	return nil
+}
+
+// transcriptionEndpoint returns the audio transcription endpoint. It defaults to
+// OpenAI but can point to any OpenAI-compatible provider (e.g. Groq) via the
+// OPENAI_BASE_URL environment variable, e.g. "https://api.groq.com/openai/v1".
+func transcriptionEndpoint() string {
+	base := strings.TrimSpace(os.Getenv("OPENAI_BASE_URL"))
+	if base == "" {
+		return "https://api.openai.com/v1/audio/transcriptions"
+	}
+	return strings.TrimRight(base, "/") + "/audio/transcriptions"
 }
 
 // Transcribe processes audio using OpenAI API
@@ -223,9 +234,11 @@ func (a *OpenAIAdapter) Transcribe(ctx context.Context, input interfaces.AudioIn
 		return nil, fmt.Errorf("failed to close multipart writer: %w", err)
 	}
 
-	// Create request
-	writeLog("Sending request to OpenAI API...")
-	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.openai.com/v1/audio/transcriptions", body)
+	// Create request. The base URL is configurable so any OpenAI-compatible
+	// transcription endpoint (e.g. Groq) can be used by setting OPENAI_BASE_URL.
+	endpoint := transcriptionEndpoint()
+	writeLog("Sending request to %s...", endpoint)
+	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, body)
 	if err != nil {
 		writeLog("Error: Failed to create request: %v", err)
 		return nil, fmt.Errorf("failed to create request: %w", err)

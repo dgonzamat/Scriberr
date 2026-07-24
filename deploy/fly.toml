@@ -1,0 +1,28 @@
+# Fly.io — Scriberr liviano (OpenAI).  Deploy:  fly deploy -c deploy/fly.toml
+# Cambia app_name por el tuyo (fly launch lo genera). Secrets: OPENAI_API_KEY, JWT_SECRET.
+
+app = "scriberr-lite"
+primary_region = "gru"   # São Paulo — baja latencia desde Chile
+
+[build]
+  dockerfile = "../Dockerfile.lite"
+
+[env]
+  APP_ENV = "production"
+  PORT = "8080"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"     # se apaga sin tráfico para ahorrar
+  auto_start_machines = true      # se enciende solo al primer request
+  min_machines_running = 0
+
+[[mounts]]
+  source = "scriberr_data"
+  destination = "/app/data"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory = "512mb"
