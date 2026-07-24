@@ -22,6 +22,34 @@ Celular (PWA)  ──▶  Scriberr en HF Space (gratis, Docker)  ──▶  Groq
 
 ---
 
+---
+
+## Opción recomendada — Render (desde GitHub, casi un clic)
+
+Render despliega **directo desde este repo** (no hay `git push` manual a ningún
+remoto). Ya viene un `render.yaml` (Blueprint) listo.
+
+1. **Key de Groq**: [console.groq.com](https://console.groq.com) → API Keys →
+   Create API Key → copia `gsk_...`.
+2. [render.com](https://render.com) → regístrate con GitHub (gratis).
+3. **New → Blueprint** → conecta tu repo `Scriberr` → Render detecta `render.yaml`
+   → **Apply**.
+4. En el servicio, **Environment → Add** el secret `OPENAI_API_KEY` = tu key de
+   Groq (las otras variables ya vienen en el blueprint). Save → redeploy.
+5. Cuando el build termina, Render te da una **URL HTTPS pública**. Ábrela →
+   regístrate → sube audio → modelo **"OpenAI Whisper"**, campo *model* =
+   `whisper-large-v3`, idioma `es`.
+6. **Instala la PWA**: iPhone (Safari) → Compartir → "Agregar a pantalla de
+   inicio"; Android (Chrome) → ⋮ → "Instalar aplicación".
+
+> Free tier de Render: el servicio se **duerme tras ~15 min** sin uso (arranque
+> frío ~1 min al abrirlo) y su disco es **efímero** (la base se reinicia en
+> redeploys — te re-registras). Igual que HF, el trabajo pesado va a Groq.
+
+---
+
+## Alternativa — Hugging Face Space
+
 ## Paso 1 — Key gratis de Groq
 
 1. Entra a [console.groq.com](https://console.groq.com) (registro gratis).

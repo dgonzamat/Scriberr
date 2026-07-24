@@ -1,0 +1,26 @@
+# Render Blueprint — Scriberr on the go ($0).
+# Despliega directo desde este repo de GitHub, sin git push manual.
+#
+# Uso:  render.com → New → Blueprint → conecta este repo → Apply.
+# Luego setea el secret OPENAI_API_KEY (tu key gratis de Groq) en el dashboard.
+#
+# Transcribe vía Groq (Whisper large v3), sin GPU ni modelos locales.
+
+services:
+  - type: web
+    name: scriberr
+    runtime: docker
+    plan: free                      # gratis; el servicio se duerme tras ~15 min sin uso
+    dockerfilePath: ./Dockerfile.lite
+    dockerContext: .
+    healthCheckPath: /api/v1/auth/registration-status
+    autoDeploy: true
+    envVars:
+      - key: OPENAI_BASE_URL        # apunta la transcripción a Groq (compatible OpenAI)
+        value: https://api.groq.com/openai/v1
+      - key: OPENAI_API_KEY         # SECRET: tu key de Groq (gsk_...) — se setea en el dashboard
+        sync: false
+      - key: JWT_SECRET             # se genera solo; mantiene los logins entre redeploys
+        generateValue: true
+      - key: APP_ENV
+        value: production
