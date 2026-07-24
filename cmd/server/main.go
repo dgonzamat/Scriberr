@@ -119,11 +119,18 @@ func main() {
 	unifiedProcessor := transcription.NewUnifiedJobProcessor(jobRepo, cfg.TempDir, cfg.TranscriptsDir)
 	unifiedProcessor.GetUnifiedService().SetBroadcaster(broadcaster)
 
-	// Bootstrap embedded Python environment (for all adapters)
-	logger.Startup("python", "Preparing Python environment")
-	if err := unifiedProcessor.InitEmbeddedPythonEnv(); err != nil {
-		logger.Error("Failed to prepare Python environment", "error", err)
-		os.Exit(1)
+	// Bootstrap embedded Python environment (for local model adapters).
+	// Skipped when SKIP_LOCAL_MODELS=true — used when transcribing via a cloud
+	// provider (Groq/OpenAI), which needs no local Python models. This makes the
+	// server boot instantly without preparing or downloading any local models.
+	if os.Getenv("SKIP_LOCAL_MODELS") == "true" {
+		logger.Info("SKIP_LOCAL_MODELS=true — skipping local model preparation (cloud transcription only)")
+	} else {
+		logger.Startup("python", "Preparing Python environment")
+		if err := unifiedProcessor.InitEmbeddedPythonEnv(); err != nil {
+			logger.Error("Failed to prepare Python environment", "error", err)
+			os.Exit(1)
+		}
 	}
 
 	// Initialize quick transcription service
